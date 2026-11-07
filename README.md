@@ -1,7 +1,9 @@
-# 3MF & STL Mesh Converter — Registered Part Export
+# 3MF and STL Converter for Aligned Parts
 
-Extract printable geometry from a Bambu Studio project and save it as a binary
-STL or a plain, geometry-only 3MF for use in another slicer such as UltiMaker Cura.
+Convert mesh geometry between 3MF and STL for use in slicers such as UltiMaker
+Cura. Extract geometry from Bambu Studio projects, or start with an existing
+STL. Keep the whole model in one file or export existing parts as separate,
+aligned STLs.
 
 **Input:** A mesh-based Bambu Studio or standard `.3mf`, or a binary or ASCII
 `.stl`. STL has no units; the converter assumes millimeters.
@@ -58,7 +60,18 @@ converter saves both formats beside the input. Outputs are named
 `input_generic.stl` and `input_generic.3mf`. The source is left untouched,
 and existing outputs are not overwritten. Use `--help` for the full options.
 
-## Export aligned parts for Cura
+## How multipart export works
+
+A multipart 3MF can hold several meshes in one file, each with its own
+position and orientation. For example, an assembly with a base and two accent
+meshes can be exported as one plain 3MF with all three meshes in place.
+Import it into Cura as a model and assign each mesh to an extruder. You don't
+need a separate 3MF for each color, and the original filament assignments
+aren't copied into the plain 3MF.
+
+Choose separate STLs when you want one file per mesh. Registered means the
+files share the same coordinate system: the converter doesn't center or drop
+each mesh separately.
 
 ```sh
 python convert_3mf.py "assembly.3mf" --output-dir "." --format stl-parts
@@ -72,8 +85,7 @@ If the Bambu project explicitly assigns the mesh or its parent to a filament
 slot, the output is labeled, for example, `assembly_filament_02_part_001.stl`.
 Parts for the same filament sort together by filename and remain separate files.
 Unassigned parts receive no filament label. The label is not embedded in STL.
-The converter does not independently center or drop the parts, so their
-coordinates remain registered. Import them into Cura, assign each part to an
+Import the STLs into Cura, assign each part to an
 extruder, and use **Merge Models** to assemble them at their shared origin.
 Check the result in Cura Preview before printing.
 
@@ -88,12 +100,10 @@ binary STL or a single painted 3MF mesh, this mode writes one STL. It does
 not infer color regions, recover missing filament assignments, or transfer sliced
 layers. An ASCII STL with several explicit solids can export one STL per solid.
 
-Plain 3MF already retains separate meshes in one file, so you do not need a
-separate 3MF per color. Assign the parts to extruders in Cura. If the source
-has only one painted mesh, use the generator's separate color exports to get
-assignable geometry.
+If the source has only one painted mesh, use the generator's separate color
+exports to get assignable geometry.
 
-## Optional: run the automated tests
+## Optional: Running automated tests
 
 Skip this section if you just want to convert a file. Use the window or
 command-line instructions above. The tests check the converter with generated
