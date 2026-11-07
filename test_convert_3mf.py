@@ -7,7 +7,7 @@ import unittest
 import zipfile
 from pathlib import Path
 
-import gear_converter as converter
+import convert_3mf as converter
 
 
 class ConverterTest(unittest.TestCase):

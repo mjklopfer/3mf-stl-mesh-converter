@@ -1,49 +1,61 @@
-# 3MF Mesh Converter
+# Bambu Studio 3MF to STL and Plain 3MF
 
-Convert a Bambu Studio .3mf project to binary STL, plain 3MF, or both.
-Uses Python 3's standard library. The window requires Tkinter, included in
-the standard Windows Python installer when Tcl/Tk support is installed.
+Extract printable geometry from a Bambu Studio project and save it as a binary
+STL or a plain, geometry-only 3MF for use in another slicer such as UltiMaker Cura.
 
-Open a PowerShell window in this folder and run:
+A slicer project can store its meshes in separate files inside the 3MF package,
+with references, transforms, and application-specific settings. If another
+slicer cannot import that project, this tool follows the mesh references and
+writes a simpler file. It works on mesh-based projects regardless of the model's
+name or shape.
 
-```powershell
-python .\gear_converter.py
+## Choose an output
+
+| Output | Use it when |
+| --- | --- |
+| **Binary STL** | You want a widely supported mesh file. All printable triangles go into one file, in millimeters. |
+| **Plain 3MF** | You want explicit units and separate mesh instances in a single file. |
+| **Both** | You want to try both formats or keep both for later. |
+
+The converter preserves geometry and model transforms. It omits slicer profiles,
+materials, colors, painted supports, and printer-specific settings. Open the
+result **as a model** in your slicer, choose your printer and material, and slice
+it there. Neither export is a printer-ready job. This tool cannot recover an
+empty STL; use the original 3MF project if available.
+
+## Use the window
+
+Download this repository (GitHub **Code → Download ZIP**) and extract it.
+Install Python 3 with Tcl/Tk support for the window. No pip packages are needed.
+
+Open a terminal in the extracted folder and run:
+
+```sh
+python convert_3mf.py
 ```
 
-Select the input .3mf, choose a save folder and format, and click **Convert**.
-The save folder initially defaults to the input folder.
+1. Browse to the input **.3mf** project.
+2. Choose an existing save folder. It defaults to the input folder.
+3. Choose **STL**, **3MF**, or **Both**, then click **Convert**.
 
-For the command line:
+## Use the command line
 
-```powershell
-python .\gear_converter.py "input.3mf" --output-dir "." --format both
+```sh
+python convert_3mf.py "input.3mf" --output-dir "." --format both
 ```
 
-Use `--format stl`, `--format 3mf`, or `--format both`. The default is both.
-The script appends `_generic` to output names and refuses to overwrite files.
+Use `--format stl`, `--format 3mf`, or `--format both`. If omitted, the
+converter saves both formats beside the input. Outputs are named
+`input_generic.stl` and `input_generic.3mf`. The source is left untouched,
+and existing outputs are not overwritten. Use `--help` for the full options.
 
-The converter follows linked mesh parts, applies object and build transforms,
-and exports coordinates in millimeters. Plain 3MF retains individual mesh
-instances; STL combines their triangles into one mesh file. Both outputs
-preserve model geometry and placement but discard slicer settings, materials,
-colors, painted supports, and printer profiles. Projects that require
-non-mesh extensions are outside the intended scope. Open the result as a
-model in Cura, then choose the printer, material, and slice there.
+## Run the tests
 
-## Quick test
-
-From the converter folder:
-
-```powershell
+```sh
 python -m unittest -v
 ```
 
-The test suite builds a small linked 3MF project in a temporary folder. It
-checks both exports, including geometry, units and placement, and verifies
-that an empty input fails cleanly and existing output files are preserved.
-It does not need Cura, Tkinter, or any external model files.
-
-To check the window manually, run `python .\gear_converter.py`, select a
-Bambu .3mf and a fresh save folder, and choose **Both**. Open the two
-resulting files as models in Cura. If the input STL is empty, use the original
-.3mf project as the source; an empty STL has no geometry to recover.
+The tests generate a linked 3MF fixture and check unit conversion, placement,
+both output formats, invalid input handling, and overwrite protection. No
+external models, Cura, or Tkinter are needed to run them. The exports were
+checked structurally; import into Cura itself has not yet been verified.
