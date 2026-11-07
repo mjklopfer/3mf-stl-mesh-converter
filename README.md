@@ -55,7 +55,8 @@ and existing outputs are not overwritten. Use `--help` for the full options.
 python -m unittest -v
 ```
 
-The tests generate a linked 3MF fixture and check unit conversion, placement,
-both output formats, invalid input handling, and overwrite protection. No
-external models, Cura, or Tkinter are needed to run them. The exports were
-checked structurally; import into Cura itself has not yet been verified.
+The automated tests generate their own 3MF fixture and check unit conversion,
+placement, both output formats, invalid input handling, and overwrite
+protection. They run headlessly using only Python's standard library.
+
+Converted output has also been tested by importing it into UltiMaker Cura.
