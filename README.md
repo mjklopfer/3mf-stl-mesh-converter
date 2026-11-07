@@ -49,7 +49,11 @@ converter saves both formats beside the input. Outputs are named
 `input_generic.stl` and `input_generic.3mf`. The source is left untouched,
 and existing outputs are not overwritten. Use `--help` for the full options.
 
-## Run the tests
+## Optional: run the automated tests
+
+Skip this section if you just want to convert a file. Use the window or
+command-line instructions above. The tests check the converter with generated
+sample data; they do not convert your files.
 
 ```sh
 python -m unittest -v
