@@ -1,4 +1,4 @@
-# 3MF and STL Mesh Converter
+# 3MF & STL Mesh Converter — Registered Part Export
 
 Extract printable geometry from a Bambu Studio project and save it as a binary
 STL or a plain, geometry-only 3MF for use in another slicer such as UltiMaker Cura.
@@ -43,7 +43,9 @@ python convert_3mf.py
 
 1. Browse to the input **.3mf** or **.stl**.
 2. Choose an existing save folder. It defaults to the input folder.
-3. Choose an export format, then click **Convert**.
+3. Choose an export format. Leave **Separate parts (registered STLs)** unchecked
+   for a single STL. Check it with **Binary STL** or **Both** to export one STL
+   per mesh, then click **Convert**.
 
 ## Use the command line
 
@@ -62,7 +64,14 @@ and existing outputs are not overwritten. Use `--help` for the full options.
 python convert_3mf.py "assembly.3mf" --output-dir "." --format stl-parts
 ```
 
+Equivalently, use `--format stl --separate-parts`; with `--format both`, this
+writes the registered STLs and one multipart 3MF.
+
 Each existing mesh instance becomes an `assembly_part_001.stl` (and so on).
+If the Bambu project explicitly assigns the mesh or its parent to a filament
+slot, the output is labeled, for example, `assembly_filament_02_part_001.stl`.
+Parts for the same filament sort together by filename and remain separate files.
+Unassigned parts receive no filament label. The label is not embedded in STL.
 The converter does not independently center or drop the parts, so their
 coordinates remain registered. Import them into Cura, assign each part to an
 extruder, and use **Merge Models** to assemble them at their shared origin.
@@ -76,8 +85,13 @@ the sources were designed with a shared origin.
 
 Separate meshes are not the same as painted faces. If the source is a single
 binary STL or a single painted 3MF mesh, this mode writes one STL. It does
-not infer color regions, recover filament assignments, or transfer sliced
+not infer color regions, recover missing filament assignments, or transfer sliced
 layers. An ASCII STL with several explicit solids can export one STL per solid.
+
+Plain 3MF already retains separate meshes in one file, so you do not need a
+separate 3MF per color. Assign the parts to extruders in Cura. If the source
+has only one painted mesh, use the generator's separate color exports to get
+assignable geometry.
 
 ## Optional: run the automated tests
 

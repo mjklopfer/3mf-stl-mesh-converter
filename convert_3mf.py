@@ -48,6 +48,11 @@ def apply_transform(meshes, value, scale):
 
 
 def read_meshes(source, *, ignore_build_placement=False):
+    return [mesh for mesh, _ in read_mesh_parts(
+        source, ignore_build_placement=ignore_build_placement)]
+
+
+def read_mesh_parts(source, *, ignore_build_placement=False):
     with zipfile.ZipFile(source) as archive:
         rels = ET.fromstring(archive.read("_rels/.rels"))
         roots = [r for r in rels if r.get("Type") == MODEL_REL]
@@ -55,6 +60,23 @@ def read_meshes(source, *, ignore_build_placement=False):
             raise ValueError("Expected one internal 3MF root model")
         main = part_path(roots[0].attrib["Target"])
         parts = {}
+        assignments = {}
+        if "Metadata/model_settings.config" in archive.namelist():
+            try:
+                settings = ET.fromstring(archive.read("Metadata/model_settings.config"))
+            except ET.ParseError:
+                settings = None
+            if settings is not None:
+                def slot(node):
+                    val = next((m.get("value", "") for m in node.findall("metadata")
+                                if m.get("key") == "extruder"), "")
+                    return int(val) if val.isascii() and val.isdigit() and len(val) <= 4 and int(val) > 0 else None
+                for obj in settings.findall("object"):
+                    overrides = {}
+                    for part in obj.findall("part"):
+                        ident = part.get("id")
+                        overrides[ident] = slot(part) if ident not in overrides else None
+                    assignments[obj.get("id")] = slot(obj), overrides
 
         def load(path):
             if path not in parts:
@@ -88,17 +110,16 @@ def read_meshes(source, *, ignore_build_placement=False):
                 if (not faces or not all(math.isfinite(x) for v in verts for x in v)
                         or any(not 0 <= i < len(verts) for f in faces for i in f)):
                     raise ValueError(f"Invalid or empty mesh in object {ident}")
-                yield verts, faces
+                yield (verts, faces), ident
                 return
             components = obj.findall(f"{tag('components')}/{tag('component')}")
             if not components:
                 raise ValueError(f"Object {ident} has no supported mesh or components")
             for comp in components:
                 target = comp.get(f"{{{PROD}}}path")
-                yield from apply_transform(
-                    resolve(part_path(target, path) if target else path,
-                            comp.attrib["objectid"], stack | {key}),
-                    comp.get("transform"), scale)
+                for geometry, leaf in resolve(part_path(target, path) if target else path,
+                                              comp.attrib["objectid"], stack | {key}):
+                    yield next(apply_transform([geometry], comp.get("transform"), scale)), leaf
 
         model, scale, _ = load(main)
         meshes = []
@@ -106,13 +127,22 @@ def read_meshes(source, *, ignore_build_placement=False):
             if item.get("printable", "1").lower() in ("0", "false"):
                 continue
             target = item.get(f"{{{PROD}}}path")
-            meshes.extend(apply_transform(
-                resolve(part_path(target, main) if target else main,
-                        item.attrib["objectid"], set()),
-                None if ignore_build_placement else item.get("transform"), scale))
+            ident = item.attrib["objectid"]
+            resolved = list(resolve(part_path(target, main) if target else main, ident, set()))
+            counts = {}
+            for _, leaf in resolved:
+                counts[leaf] = counts.get(leaf, 0) + 1
+            default, overrides = assignments.get(ident, (None, {}))
+            for geometry, leaf in resolved:
+                # Duplicate leaf IDs can refer to distinct model parts.
+                slot = (None if counts[leaf] != 1 and leaf in overrides
+                        else overrides.get(leaf) or default)
+                mesh = next(apply_transform([geometry],
+                    None if ignore_build_placement else item.get("transform"), scale))
+                meshes.append((mesh, slot))
         if not meshes:
             raise ValueError("No printable triangle meshes found")
-        if not all(math.isfinite(x) for vertices, _ in meshes for v in vertices for x in v):
+        if not all(math.isfinite(x) for (vertices, _), _ in meshes for v in vertices for x in v):
             raise ValueError("Transformed mesh has invalid coordinates")
         return meshes
 
@@ -214,7 +244,7 @@ def write_3mf(file, meshes):
             archive.writestr(name, ET.tostring(xml, encoding="utf-8", xml_declaration=True))
 
 
-def convert(source, output_dir, fmt, *, ignore_build_placement=False):
+def convert(source, output_dir, fmt, *, ignore_build_placement=False, separate_parts=False):
     source, output_dir = Path(source), Path(output_dir)
     suffix = source.suffix.lower()
     if not source.is_file() or suffix not in (".3mf", ".stl"):
@@ -223,15 +253,22 @@ def convert(source, output_dir, fmt, *, ignore_build_placement=False):
         raise ValueError("Select an existing output folder.")
     if fmt not in FORMATS:
         raise ValueError("Unsupported output format")
-    meshes = (read_meshes(source, ignore_build_placement=ignore_build_placement)
-              if suffix == ".3mf" else read_stl(source))
-    if fmt == "stl-parts":
-        jobs = [(output_dir / f"{source.stem}_part_{i:03d}.stl", write_stl, [mesh])
-                for i, mesh in enumerate(meshes, 1)]
-    else:
-        formats = ("stl", "3mf") if fmt == "both" else (fmt,)
-        jobs = [(output_dir / f"{source.stem}_generic.{ext}",
-                 write_stl if ext == "stl" else write_3mf, meshes) for ext in formats]
+    if separate_parts and fmt == "3mf":
+        raise ValueError("Separate parts requires STL output (STL or Both).")
+    parts = (read_mesh_parts(source, ignore_build_placement=ignore_build_placement)
+             if suffix == ".3mf" else [(mesh, None) for mesh in read_stl(source)])
+    meshes = [mesh for mesh, _ in parts]
+    formats = ("stl", "3mf") if fmt == "both" else (fmt,)
+    jobs = []
+    for ext in formats:
+        if ext == "stl-parts" or (ext == "stl" and separate_parts):
+            for i, (mesh, slot) in enumerate(parts, 1):
+                prefix = f"_filament_{slot:02d}" if slot is not None else ""
+                jobs.append((output_dir / f"{source.stem}{prefix}_part_{i:03d}.stl",
+                             write_stl, [mesh]))
+        else:
+            jobs.append((output_dir / f"{source.stem}_generic.{ext}",
+                         write_stl if ext == "stl" else write_3mf, meshes))
     outputs = [dest for dest, _, _ in jobs]
     for dest in outputs:
         if dest.exists():
@@ -253,10 +290,10 @@ def gui():
     root = tk.Tk()
     root.title("3MF and STL Mesh Converter")
     root.columnconfigure(1, weight=1)
-    formats = {"Both (STL and 3MF)": "both", "Binary STL": "stl",
-               "Plain 3MF": "3mf", "Registered STL parts": "stl-parts"}
+    formats = {"Both (STL and 3MF)": "both", "Binary STL": "stl", "Plain 3MF": "3mf"}
     source, output, fmt = tk.StringVar(), tk.StringVar(), tk.StringVar(value=next(iter(formats)))
     ignore_placement = tk.BooleanVar(value=False)
+    separate = tk.BooleanVar(value=False)
 
     def select_file():
         path = filedialog.askopenfilename(filetypes=[("3MF and STL", "*.3mf *.stl"),
@@ -274,7 +311,8 @@ def gui():
     def save():
         try:
             paths = convert(source.get(), output.get(), formats[fmt.get()],
-                            ignore_build_placement=ignore_placement.get())
+                            ignore_build_placement=ignore_placement.get(),
+                            separate_parts=separate.get())
         except Exception as exc:
             messagebox.showerror("Conversion failed", str(exc), parent=root)
         else:
@@ -290,7 +328,9 @@ def gui():
                  state="readonly", width=23).grid(row=2, column=1, sticky="w")
     ttk.Checkbutton(root, text="Ignore 3MF build-plate placement",
                     variable=ignore_placement).grid(row=3, column=1, sticky="w")
-    ttk.Button(root, text="Convert", command=save).grid(row=4, column=1, pady=10)
+    ttk.Checkbutton(root, text="Separate parts (registered STLs)",
+                    variable=separate).grid(row=4, column=1, sticky="w")
+    ttk.Button(root, text="Convert", command=save).grid(row=5, column=1, pady=10)
     root.mainloop()
 
 
@@ -301,13 +341,16 @@ def main():
     parser.add_argument("-f", "--format", choices=FORMATS, default="both")
     parser.add_argument("--ignore-build-placement", action="store_true",
                         help="ignore 3MF build-item transforms; keep component transforms")
+    parser.add_argument("--separate-parts", action="store_true",
+                        help="replace the combined STL with registered part STLs")
     args = parser.parse_args()
     if args.source is None:
         gui()
         return 0
     try:
         for path in convert(args.source, args.output_dir or args.source.parent, args.format,
-                            ignore_build_placement=args.ignore_build_placement):
+                            ignore_build_placement=args.ignore_build_placement,
+                            separate_parts=args.separate_parts):
             print(path.resolve())
     except (OSError, ValueError, KeyError, ET.ParseError, zipfile.BadZipFile,
             struct.error, RecursionError) as exc:

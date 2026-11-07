@@ -101,6 +101,20 @@ class ConverterTest(unittest.TestCase):
         self.assertEqual(converter.read_stl(part)[0][0],
                          [(2, 0, 0), (12, 0, 0), (2, 10, 0)])
 
+    def test_explicit_filament_labels_only_when_separating(self):
+        with zipfile.ZipFile(self.source, "a") as archive:
+            archive.writestr("Metadata/model_settings.config", """
+                <config><object id="2"><metadata key="extruder" value="1"/>
+                  <part id="1"><metadata key="extruder" value="3"/></part>
+                </object></config>""")
+        combined, = converter.convert(self.source, self.folder, "stl")
+        self.assertEqual(combined.name, "linked_generic.stl")
+        part, model = converter.convert(self.source, self.folder, "both",
+                                        separate_parts=True)
+        self.assertEqual(part.name, "linked_filament_03_part_001.stl")
+        self.assertEqual(model.name, "linked_generic.3mf")
+        self.assertEqual(converter.read_stl(part), converter.read_meshes(model))
+
 
 if __name__ == "__main__":
     unittest.main()
