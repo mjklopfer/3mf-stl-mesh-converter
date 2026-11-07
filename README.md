@@ -23,16 +23,6 @@ result **as a model** in your slicer, choose your printer and material, and slic
 it there. Neither export is a printer-ready job. This tool cannot recover an
 empty STL; use the original 3MF project if available.
 
-### Show a print preview on an UltiMaker S5
-
-The converted model does not carry the Bambu Studio plate thumbnail. In Cura,
-open the converted model, select the UltiMaker S5, slice, and save the job as
-an **UltiMaker Format Package (.ufp)**. Cura can include its own snapshot in
-that package as `Metadata/thumbnail.png` when a snapshot is available. If the
-S5 shows no preview, open the .ufp as a ZIP archive and check for that entry.
-A preview in the original 3MF does not establish that the sliced job contains
-one.
-
 ## Use the window
 
 Download this repository (GitHub **Code → Download ZIP**) and extract it.
