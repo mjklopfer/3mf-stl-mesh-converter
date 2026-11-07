@@ -1,7 +1,12 @@
-# Bambu Studio 3MF to STL and Plain 3MF
+# Bambu Studio 3MF Converter: Export STL, 3MF, or Both
 
 Extract printable geometry from a Bambu Studio project and save it as a binary
 STL or a plain, geometry-only 3MF for use in another slicer such as UltiMaker Cura.
+
+**Input:** A Bambu Studio project (`.3mf`).
+**Output:** Choose **STL** (`.stl`), **plain 3MF** (`.3mf`), or **both** (one
+file of each type). Plain 3MF uses the same extension as the input; it contains
+the model geometry without Bambu Studio's project settings.
 
 A slicer project can store its meshes in separate files inside the 3MF package,
 with references, transforms, and application-specific settings. If another
