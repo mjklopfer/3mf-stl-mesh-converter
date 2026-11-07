@@ -79,6 +79,28 @@ class ConverterTest(unittest.TestCase):
         self.assertIn("Conversion failed", result.stderr)
         self.assertFalse(list(self.folder.glob("empty_generic.*")))
 
+    def test_registered_stls_keep_shared_coordinates(self):
+        stl = self.folder / "two.stl"
+        def solid(name, x):
+            return (f"solid {name}\nfacet normal 0 0 1\nouter loop\n"
+                    f"vertex {x} 0 2\nvertex {x+1} 0 2\nvertex {x} 1 2\n"
+                    f"endloop\nendfacet\nendsolid {name}\n")
+        stl.write_text(solid("left", 4) + solid("right", 20), encoding="ascii")
+        parts = converter.convert(stl, self.folder, "stl-parts")
+        self.assertEqual(len(parts), 2)
+        for part, x in zip(parts, (4, 20)):
+            vertices, faces = converter.read_stl(part)[0]
+            self.assertEqual(vertices, [(x, 0, 2), (x+1, 0, 2), (x, 1, 2)])
+            self.assertEqual(faces, [(0, 1, 2)])
+        stl_out, model_out = converter.convert(parts[0], self.folder, "both")
+        self.assertEqual(converter.read_stl(stl_out), converter.read_meshes(model_out))
+
+    def test_ignoring_placement_keeps_component_offset(self):
+        part, = converter.convert(self.source, self.folder, "stl-parts",
+                                  ignore_build_placement=True)
+        self.assertEqual(converter.read_stl(part)[0][0],
+                         [(2, 0, 0), (12, 0, 0), (2, 10, 0)])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,4 +1,4 @@
-"""Convert mesh-based 3MF projects to plain 3MF and/or binary STL."""
+"""Convert 3MF and STL meshes to plain 3MF, STL, or registered STL parts."""
 import argparse
 import math
 import posixpath
@@ -16,6 +16,7 @@ MODEL_REL = "http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"
 PROD = "http://schemas.microsoft.com/3dmanufacturing/production/2015/06"
 SCALE = dict(micron=.001, millimeter=1, centimeter=10, inch=25.4, foot=304.8, meter=1000)
 IDENTITY = (1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
+FORMATS = ("stl", "3mf", "both", "stl-parts")
 
 
 def tag(name):
@@ -46,7 +47,7 @@ def apply_transform(meshes, value, scale):
                [(a, c, b) for a, b, c in faces] if det < 0 else faces)
 
 
-def read_meshes(source):
+def read_meshes(source, *, ignore_build_placement=False):
     with zipfile.ZipFile(source) as archive:
         rels = ET.fromstring(archive.read("_rels/.rels"))
         roots = [r for r in rels if r.get("Type") == MODEL_REL]
@@ -107,7 +108,8 @@ def read_meshes(source):
             target = item.get(f"{{{PROD}}}path")
             meshes.extend(apply_transform(
                 resolve(part_path(target, main) if target else main,
-                        item.attrib["objectid"], set()), item.get("transform"), scale))
+                        item.attrib["objectid"], set()),
+                None if ignore_build_placement else item.get("transform"), scale))
         if not meshes:
             raise ValueError("No printable triangle meshes found")
         if not all(math.isfinite(x) for vertices, _ in meshes for v in vertices for x in v):
@@ -115,9 +117,65 @@ def read_meshes(source):
         return meshes
 
 
+def read_stl(source):
+    """Read binary or ASCII STL. Treat its unitless coordinates as millimeters."""
+    data = source.read_bytes()
+    count = struct.unpack_from("<I", data, 80)[0] if len(data) >= 84 else 0
+    if len(data) >= 84 and len(data) == 84 + 50 * count:
+        triangles = ((r[3:6], r[6:9], r[9:12])
+                     for r in struct.iter_unpack("<12fH", data[84:]))
+        parts = [triangles]
+    else:
+        try:
+            lines = data.decode("ascii").splitlines()
+        except UnicodeDecodeError as exc:
+            raise ValueError("Invalid or truncated binary STL") from exc
+        parts, solid, facet = [], None, None
+        for line in lines:
+            words = line.split()
+            if not words:
+                continue
+            key = words[0].lower()
+            if key == "solid" and solid is None:
+                solid = []
+            elif key == "facet" and solid is not None and facet is None:
+                facet = []
+            elif key == "vertex" and facet is not None and len(words) == 4:
+                facet.append(tuple(map(float, words[1:])))
+            elif key == "endfacet" and facet is not None and len(facet) == 3:
+                solid.append(facet)
+                facet = None
+            elif key == "endsolid" and solid is not None and facet is None:
+                if solid:
+                    parts.append(solid)
+                solid = None
+            elif key not in ("outer", "endloop") or facet is None:
+                raise ValueError("Invalid ASCII STL structure")
+        if solid is not None or facet is not None:
+            raise ValueError("Incomplete ASCII STL")
+    meshes = []
+    for triangles in parts:
+        vertices, faces, index = [], [], {}
+        for triangle in triangles:
+            face = []
+            for vertex in triangle:
+                if not all(map(math.isfinite, vertex)):
+                    raise ValueError("STL contains non-finite coordinates")
+                if vertex not in index:
+                    index[vertex] = len(vertices)
+                    vertices.append(vertex)
+                face.append(index[vertex])
+            faces.append(tuple(face))
+        if faces:
+            meshes.append((vertices, faces))
+    if not meshes:
+        raise ValueError("STL contains no triangles")
+    return meshes
+
+
 def write_stl(file, meshes):
     count = sum(len(faces) for _, faces in meshes)
-    file.write(b"Converted 3MF geometry (millimeters)".ljust(80, b"\0"))
+    file.write(b"Converted mesh geometry (millimeters)".ljust(80, b"\0"))
     file.write(struct.pack("<I", count))
     for vertices, faces in meshes:
         for ids in faces:
@@ -156,22 +214,32 @@ def write_3mf(file, meshes):
             archive.writestr(name, ET.tostring(xml, encoding="utf-8", xml_declaration=True))
 
 
-def convert(source, output_dir, fmt):
+def convert(source, output_dir, fmt, *, ignore_build_placement=False):
     source, output_dir = Path(source), Path(output_dir)
-    if not source.is_file() or source.suffix.lower() != ".3mf":
-        raise ValueError("Select an existing .3mf file.")
+    suffix = source.suffix.lower()
+    if not source.is_file() or suffix not in (".3mf", ".stl"):
+        raise ValueError("Select an existing .3mf or .stl file.")
     if not output_dir.is_dir():
         raise ValueError("Select an existing output folder.")
-    meshes = read_meshes(source)
-    formats = ("stl", "3mf") if fmt == "both" else (fmt,)
-    outputs = [output_dir / f"{source.stem}_generic.{ext}" for ext in formats]
+    if fmt not in FORMATS:
+        raise ValueError("Unsupported output format")
+    meshes = (read_meshes(source, ignore_build_placement=ignore_build_placement)
+              if suffix == ".3mf" else read_stl(source))
+    if fmt == "stl-parts":
+        jobs = [(output_dir / f"{source.stem}_part_{i:03d}.stl", write_stl, [mesh])
+                for i, mesh in enumerate(meshes, 1)]
+    else:
+        formats = ("stl", "3mf") if fmt == "both" else (fmt,)
+        jobs = [(output_dir / f"{source.stem}_generic.{ext}",
+                 write_stl if ext == "stl" else write_3mf, meshes) for ext in formats]
+    outputs = [dest for dest, _, _ in jobs]
     for dest in outputs:
         if dest.exists():
             raise FileExistsError(f"Output already exists: {dest}")
-    for ext, dest in zip(formats, outputs):
+    for dest, writer, geometry in jobs:
         with dest.open("xb") as file:
             try:
-                (write_stl if ext == "stl" else write_3mf)(file, meshes)
+                writer(file, geometry)
             except Exception:
                 file.close()
                 dest.unlink()
@@ -183,12 +251,16 @@ def gui():
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
     root = tk.Tk()
-    root.title("3MF Mesh Converter")
+    root.title("3MF and STL Mesh Converter")
     root.columnconfigure(1, weight=1)
-    source, output, fmt = tk.StringVar(), tk.StringVar(), tk.StringVar(value="both")
+    formats = {"Both (STL and 3MF)": "both", "Binary STL": "stl",
+               "Plain 3MF": "3mf", "Registered STL parts": "stl-parts"}
+    source, output, fmt = tk.StringVar(), tk.StringVar(), tk.StringVar(value=next(iter(formats)))
+    ignore_placement = tk.BooleanVar(value=False)
 
     def select_file():
-        path = filedialog.askopenfilename(filetypes=[("3MF projects", "*.3mf")])
+        path = filedialog.askopenfilename(filetypes=[("3MF and STL", "*.3mf *.stl"),
+                                                    ("3MF projects", "*.3mf"), ("STL meshes", "*.stl")])
         if path:
             source.set(path)
             if not output.get():
@@ -201,35 +273,41 @@ def gui():
 
     def save():
         try:
-            paths = convert(source.get(), output.get(), fmt.get())
+            paths = convert(source.get(), output.get(), formats[fmt.get()],
+                            ignore_build_placement=ignore_placement.get())
         except Exception as exc:
             messagebox.showerror("Conversion failed", str(exc), parent=root)
         else:
             messagebox.showinfo("Conversion complete", "\n".join(map(str, paths)), parent=root)
 
     for row, (label, var, choose) in enumerate(
-            (("Input 3MF", source, select_file), ("Save folder", output, select_dir))):
+            (("Input mesh", source, select_file), ("Save folder", output, select_dir))):
         ttk.Label(root, text=label).grid(row=row, column=0, padx=8, pady=6, sticky="w")
         ttk.Entry(root, textvariable=var, width=55).grid(row=row, column=1, sticky="ew")
         ttk.Button(root, text="Browse…", command=choose).grid(row=row, column=2, padx=8)
     ttk.Label(root, text="Export as").grid(row=2, column=0, padx=8, sticky="w")
-    ttk.Combobox(root, textvariable=fmt, values=("stl", "3mf", "both"),
-                 state="readonly", width=10).grid(row=2, column=1, sticky="w")
-    ttk.Button(root, text="Convert", command=save).grid(row=3, column=1, pady=10)
+    ttk.Combobox(root, textvariable=fmt, values=tuple(formats),
+                 state="readonly", width=23).grid(row=2, column=1, sticky="w")
+    ttk.Checkbutton(root, text="Ignore 3MF build-plate placement",
+                    variable=ignore_placement).grid(row=3, column=1, sticky="w")
+    ttk.Button(root, text="Convert", command=save).grid(row=4, column=1, pady=10)
     root.mainloop()
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("source", type=Path, nargs="?", help="input .3mf project; omit for GUI")
+    parser.add_argument("source", type=Path, nargs="?", help="input .3mf or .stl; omit for GUI")
     parser.add_argument("-o", "--output-dir", type=Path, help="existing save folder (default: input folder)")
-    parser.add_argument("-f", "--format", choices=("stl", "3mf", "both"), default="both")
+    parser.add_argument("-f", "--format", choices=FORMATS, default="both")
+    parser.add_argument("--ignore-build-placement", action="store_true",
+                        help="ignore 3MF build-item transforms; keep component transforms")
     args = parser.parse_args()
     if args.source is None:
         gui()
         return 0
     try:
-        for path in convert(args.source, args.output_dir or args.source.parent, args.format):
+        for path in convert(args.source, args.output_dir or args.source.parent, args.format,
+                            ignore_build_placement=args.ignore_build_placement):
             print(path.resolve())
     except (OSError, ValueError, KeyError, ET.ParseError, zipfile.BadZipFile,
             struct.error, RecursionError) as exc:
