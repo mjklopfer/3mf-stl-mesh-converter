@@ -1,9 +1,14 @@
 # 3MF and STL Converter for Aligned Parts
 
-Bring **Bambu Studio 3MF projects into UltiMaker Cura or another slicer** when
+Bring **Bambu Studio 3MF projects into UltiMaker Cura** when
 the original project doesn't import as expected. Export a plain 3MF or binary
 STL, and keep existing parts aligned for manual extruder assignment. The tool
 also accepts standard mesh-based 3MF and STL inputs.
+
+Cura import has been tested. [PrusaSlicer](https://help.prusa3d.com/article/supported-file-formats_1772)
+and [OrcaSlicer](https://github.com/OrcaSlicer/OrcaSlicer/wiki/import_export)
+also document STL and 3MF import; this project's exports haven't been tested
+in those two slicers.
 
 **Input:** A mesh-based Bambu Studio or standard `.3mf`, or a binary or ASCII
 `.stl`. STL has no units; the converter assumes millimeters.
