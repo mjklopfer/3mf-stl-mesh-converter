@@ -1,9 +1,9 @@
 # 3MF and STL Converter for Aligned Parts
 
-Convert mesh geometry between 3MF and STL for use in slicers such as UltiMaker
-Cura. Extract geometry from Bambu Studio projects, or start with an existing
-STL. Keep the whole model in one file or export existing parts as separate,
-aligned STLs.
+Bring **Bambu Studio 3MF projects into UltiMaker Cura or another slicer** when
+the original project doesn't import as expected. Export a plain 3MF or binary
+STL, and keep existing parts aligned for manual extruder assignment. The tool
+also accepts standard mesh-based 3MF and STL inputs.
 
 **Input:** A mesh-based Bambu Studio or standard `.3mf`, or a binary or ASCII
 `.stl`. STL has no units; the converter assumes millimeters.
@@ -11,11 +11,16 @@ aligned STLs.
 **Output:** Choose one STL, plain 3MF, both, or one registered STL per source
 mesh instance. Plain 3MF contains the geometry without Bambu Studio's settings.
 
-A slicer project can store its meshes in separate files inside the 3MF package,
-with references, transforms, and application-specific settings. If another
-slicer cannot import that project, this tool follows the mesh references and
-writes a simpler file. It works on mesh-based projects regardless of the model's
-name or shape.
+## Why convert a Bambu Studio project?
+
+A Bambu Studio `.3mf` can store its meshes in separate files inside the
+package, along with references, part transforms, and Bambu-specific slicer
+settings. Another slicer may not handle that project layout or those settings
+the same way. The converter follows the mesh references, applies the transforms,
+and writes simpler model files you can slice with your own printer and material
+profiles. If the Bambu project contains separate meshes, you can keep them
+together in one plain 3MF or export aligned STLs. Painted colors on a single
+mesh do not become separate parts.
 
 ## Choose an output
 
